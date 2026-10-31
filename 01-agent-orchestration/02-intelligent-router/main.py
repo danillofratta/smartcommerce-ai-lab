@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_groq import ChatGroq
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import  add_messages
-from typer import prompt
 
 load_dotenv()
 
@@ -147,7 +146,10 @@ for member in ["vendas", "pedidos", "pagamentos", "suporte"]:
 workflow.add_conditional_edges(
     "router",
     lambda state: state["agent_name"],
-    {name: name for name in ["vendas", "pedidos", "pagamentos", "suporte"]},
+    {
+        name: name 
+        for name in ["vendas", "pedidos", "pagamentos", "suporte"]
+    },
 )
 
 workflow.set_entry_point("router")
