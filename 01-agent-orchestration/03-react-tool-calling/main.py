@@ -4,7 +4,6 @@ import json
 
 from langchain_core.messages import ToolMessage
 from dotenv import load_dotenv
-from flask import app
 from tools import get_order, get_payment, get_delivery
 from langgraph.prebuilt import ToolNode,  tools_condition
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -42,19 +41,24 @@ def call_agent(state: MessagesState) -> dict:
     )
     return {"messages": [response]}
 
-workflow = StateGraph(MessagesState)
+def build_graph() -> StateGraph:
+    workflow = StateGraph(MessagesState)
 
-workflow.add_node("call_agent", call_agent)
-workflow.add_node("tools", ToolNode(list_tools))
+    workflow.add_node("call_agent", call_agent)
+    workflow.add_node("tools", ToolNode(list_tools))
 
-workflow.add_edge(START, "call_agent")
+    workflow.add_edge(START, "call_agent")
 
-workflow.add_conditional_edges(
-    "call_agent",
-    tools_condition,
-)
+    workflow.add_conditional_edges(
+        "call_agent",
+        tools_condition,
+    )
 
-workflow.add_edge("tools", "call_agent")
+    workflow.add_edge("tools", "call_agent")
+
+    return workflow
+
+workflow = build_graph()
 
 app = workflow.compile()
 
@@ -111,9 +115,16 @@ if __name__ == "__main__":
         "messages": [HumanMessage(content=customer_request)]
     }
 
-    for step in app.stream(initial_state, stream_mode="updates"):
-        for update in step.values():
-            for message in update.get("messages", []):
-                print_message(message)
+    config = {
+        "recursion_limit": 12
+    }
+
+    try:
+        for step in app.stream(initial_state, config=config, stream_mode="updates"):
+            for update in step.values():
+                for message in update.get("messages", []):
+                    print_message(message)
+    except Exception as e:
+        print(f"Erro durante a execução: {e}")
 
     print("\n[END]")        

@@ -19,7 +19,15 @@ def get_order(order_id: str) -> dict:
 
 @tool
 def get_payment(order_id: str) -> dict:
-    """Consulta o pagamento pelo ID do pedido fornecido"""
+    """
+    Consulta o status de pagamento de um pedido existente.
+
+    Use quando o cliente perguntar sobre pagamento,
+    aprovação, pendência ou confirmação de cobrança.
+
+    Esta ferramenta apenas consulta informações.
+    Não processa pagamentos nem realiza estornos.
+    """
     order = get_order_store(order_id)
     if not order:
         return {"error": "Pedido não encontrado"}
