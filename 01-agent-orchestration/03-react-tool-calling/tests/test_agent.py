@@ -39,20 +39,32 @@ def block_network(monkeypatch):
 
 @pytest.fixture
 def lab(monkeypatch):
-    # Patch BEFORE importing main: it creates its model at module scope.
-    # Never read the developer's .env or construct a real provider client.
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda: False)
-    monkeypatch.setenv("LLM_MODEL", "offline-test-model")
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Provider setup is forbidden in offline graph tests")
+
+    monkeypatch.setattr(dotenv, "load_dotenv", forbidden)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
     model = Mock(name="scripted_model")
     model.invoke.side_effect = AssertionError("Configure scripted responses first")
     client = Mock(name="provider_client")
     client.bind_tools.return_value = model
-    monkeypatch.setattr(langchain_groq, "ChatGroq", Mock(return_value=client))
+    monkeypatch.setattr(langchain_groq, "ChatGroq", forbidden)
 
     data = load_module("data", "data.py", monkeypatch)
     tools = load_module("tools", "tools.py", monkeypatch)
+    for name in ("state", "prompts", "agents", "graph"):
+        load_module(name, f"{name}.py", monkeypatch)
     main = load_module("smartcommerce_react_under_test", "main.py", monkeypatch)
-    return main, tools, data, model
+    app = main.build_graph(client)
+    client.bind_tools.assert_called_once_with([
+        tools.get_order, tools.get_payment, tools.get_delivery,
+    ])
+    return main, tools, data, model, app
+
+
+def test_imports_and_graph_build_do_not_require_provider_configuration(lab, capsys):
+    assert callable(lab[0].build_graph)
+    assert capsys.readouterr().out == ""
 
 
 def request_tool(name, call_id, order_id="1024"):
@@ -73,7 +85,7 @@ def request_tool(name, call_id, order_id="1024"):
     ("get_delivery", "1025", "pending"),
 ])
 def test_tools_return_distinct_business_statuses(lab, name, order_id, status):
-    _, tools, _, _ = lab
+    _, tools, _, _, _ = lab
     result = getattr(tools, name).invoke({"order_id": order_id})
     assert result["status"] == status
     assert "error" not in result
@@ -82,13 +94,13 @@ def test_tools_return_distinct_business_statuses(lab, name, order_id, status):
 @pytest.mark.parametrize("name", ["get_order", "get_payment", "get_delivery"])
 @pytest.mark.parametrize("order_id", ["9999", "invalid"])
 def test_tools_report_missing_or_invalid_order(lab, name, order_id):
-    _, tools, _, _ = lab
+    _, tools, _, _, _ = lab
     result = getattr(tools, name).invoke({"order_id": order_id})
     assert result == {"error": "Pedido não encontrado"}
 
 
 def test_graph_runs_order_then_payment_and_delivery(lab):
-    main, _, _, model = lab
+    _, _, _, model, app = lab
     follow_up = AIMessage(content="", tool_calls=[
         {"name": "get_payment", "args": {"order_id": "1024"}, "id": "payment"},
         {"name": "get_delivery", "args": {"order_id": "1024"}, "id": "delivery"},
@@ -99,7 +111,7 @@ def test_graph_runs_order_then_payment_and_delivery(lab):
     ]
     initial = HumanMessage(content="O pedido 1024 foi pago? Quando será entregue?")
 
-    updates = list(main.app.stream({"messages": [initial]}, stream_mode="updates"))
+    updates = list(app.stream({"messages": [initial]}, stream_mode="updates"))
 
     assert [next(iter(step)) for step in updates] == [
         "call_agent", "tools", "call_agent", "tools", "call_agent",
@@ -127,9 +139,9 @@ def test_graph_runs_order_then_payment_and_delivery(lab):
 
 
 def test_graph_ends_without_tools_when_model_answers_directly(lab):
-    main, _, _, model = lab
+    _, _, _, model, app = lab
     model.invoke.side_effect = [AIMessage(content="Informe o número do pedido.")]
-    result = main.app.invoke({"messages": [HumanMessage(content="Onde está meu pedido?")]})
+    result = app.invoke({"messages": [HumanMessage(content="Onde está meu pedido?")]})
     assert len(result["messages"]) == 2
     assert result["messages"][-1].content == "Informe o número do pedido."
     assert not any(isinstance(message, ToolMessage) for message in result["messages"])
@@ -137,12 +149,12 @@ def test_graph_ends_without_tools_when_model_answers_directly(lab):
 
 
 def test_graph_passes_lookup_error_back_to_model(lab):
-    main, _, _, model = lab
+    _, _, _, model, app = lab
     model.invoke.side_effect = [
         request_tool("get_order", "missing", "9999"),
         AIMessage(content="Pedido não encontrado."),
     ]
-    result = main.app.invoke({"messages": [HumanMessage(content="Consulte 9999.")]})
+    result = app.invoke({"messages": [HumanMessage(content="Consulte 9999.")]})
     tool_result = result["messages"][2]
     assert isinstance(tool_result, ToolMessage)
     assert tool_result.tool_call_id == "missing"
@@ -151,25 +163,24 @@ def test_graph_passes_lookup_error_back_to_model(lab):
 
 
 def test_graph_stops_repeated_calls_at_configured_limit(lab):
-    main, _, _, model = lab
+    _, _, _, model, app = lab
     model.invoke.side_effect = lambda messages: request_tool(
         "get_order", f"repeat-{len(messages)}"
     )
     with pytest.raises(GraphRecursionError):
-        main.app.invoke(
+        app.invoke(
             {"messages": [HumanMessage(content="Consulte 1024.")]},
             config={"recursion_limit": 4},
         )
 
 
 def test_console_shows_calls_tool_results_and_final_without_metadata(lab, capsys):
-    main, _, _, model = lab
-    capsys.readouterr()  # Discard the model name printed during module import.
+    main, _, _, model, app = lab
     model.invoke.side_effect = [
         request_tool("get_order", "order"),
         AIMessage(content="Pedido confirmado."),
     ]
-    for step in main.app.stream(
+    for step in app.stream(
         {"messages": [HumanMessage(content="Consulte 1024.")]}, stream_mode="updates"
     ):
         for update in step.values():
@@ -191,7 +202,7 @@ def test_console_shows_calls_tool_results_and_final_without_metadata(lab, capsys
     ('["unexpected", "list"]', "['unexpected', 'list']"),
 ])
 def test_console_handles_tool_errors_and_payloads(lab, capsys, content, expected):
-    main, _, _, _ = lab
+    main, _, _, _, _ = lab
     capsys.readouterr()
     main.print_message(ToolMessage(
         content=content, name="get_delivery", tool_call_id="delivery"
@@ -200,23 +211,18 @@ def test_console_handles_tool_errors_and_payloads(lab, capsys, content, expected
 
 
 def test_order_exposes_customer_for_personalized_greeting(lab):
-    _, tools, _, _ = lab
+    _, tools, _, _, _ = lab
     assert tools.get_order.invoke({"order_id": "1024"}).get("customer") == "Maria"
 
 
 def test_delivery_exposes_estimated_date(lab):
-    _, tools, _, _ = lab
+    _, tools, _, _, _ = lab
     result = tools.get_delivery.invoke({"order_id": "1024"})
     assert result.get("estimated_delivery") == "05/11/2026"
 
 
-# Keep this known fixture gap visible; remove the marker after fixing the date.
-@pytest.mark.xfail(
-    strict=True, raises=ValueError,
-    reason="Order 1025 has a date outside DD/MM/YYYY",
-)
 def test_fixture_dates_use_consistent_day_month_year_format(lab):
-    _, _, data, _ = lab
+    _, _, data, _, _ = lab
     for order in data.list_orders.values():
         if order.get("estimated_delivery"):
             datetime.strptime(order["estimated_delivery"], "%d/%m/%Y")

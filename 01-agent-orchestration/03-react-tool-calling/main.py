@@ -1,66 +1,24 @@
+import json
 import os
 
-import json
-
-from langchain_core.messages import ToolMessage
 from dotenv import load_dotenv
-from tools import get_order, get_payment, get_delivery
-from langgraph.prebuilt import ToolNode,  tools_condition
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_groq import ChatGroq
-from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.errors import GraphRecursionError
 
-load_dotenv()
-
-model_name = os.getenv("LLM_MODEL")
-if not model_name:
-    raise ValueError("Defina LLM_MODEL no .env ou nas variáveis de ambiente.")
-
-print(f"Usando modelo: {model_name}")
+from graph import build_graph
 
 
-llm = ChatGroq(model=model_name, temperature=0, max_retries=0)
-list_tools = [get_order, get_payment, get_delivery]
-llm_with_tools = llm.bind_tools(list_tools)
+def create_model() -> ChatGroq:
+    load_dotenv()
 
-def call_agent(state: MessagesState) -> dict:
-    instructions = SystemMessage(content="""
-        Você é o atendente da SmartCommerce.
-        Responda em português, com clareza e cordialidade.
+    model_name = os.getenv("LLM_MODEL")
+    if not model_name:
+        raise ValueError("Defina LLM_MODEL no .env ou nas variáveis de ambiente.")
 
-        Consulte primeiro o pedido para verificar sua existência.
-        Se não encontrar, informe ao cliente e encerre.
-        Quando perguntarem sobre pagamento, consulte a ferramenta de pagamento.
-        Quando perguntarem sobre entrega, consulte a ferramenta de entrega.
-        Use somente os dados retornados pelas ferramentas.
-        Se uma informação estiver ausente ou unknown, informe que está indisponível.
-        Na resposta final, cumprimente o cliente pelo nome quando disponível.
-        """)    
-    response = llm_with_tools.invoke(
-        [instructions, *state["messages"]]
-    )
-    return {"messages": [response]}
+    print(f"Usando modelo: {model_name}")
 
-def build_graph() -> StateGraph:
-    workflow = StateGraph(MessagesState)
-
-    workflow.add_node("call_agent", call_agent)
-    workflow.add_node("tools", ToolNode(list_tools))
-
-    workflow.add_edge(START, "call_agent")
-
-    workflow.add_conditional_edges(
-        "call_agent",
-        tools_condition,
-    )
-
-    workflow.add_edge("tools", "call_agent")
-
-    return workflow
-
-workflow = build_graph()
-
-app = workflow.compile()
+    return ChatGroq(model=model_name, temperature=0, max_retries=0)
 
 def print_message(message: BaseMessage) -> None:
     if isinstance(message, AIMessage):
@@ -106,6 +64,9 @@ def print_message(message: BaseMessage) -> None:
 
 
 if __name__ == "__main__":
+    llm = create_model()
+    app = build_graph(llm)
+
     print("SMARTCOMMERCE AI — REACT AGENT")
 
     customer_request = input("Digite a solicitação do cliente: ")
@@ -124,6 +85,8 @@ if __name__ == "__main__":
             for update in step.values():
                 for message in update.get("messages", []):
                     print_message(message)
+    except GraphRecursionError:
+        print("Limite de etapas atingido. Não foi possível concluir o atendimento.")
     except Exception as e:
         print(f"Erro durante a execução: {e}")
 

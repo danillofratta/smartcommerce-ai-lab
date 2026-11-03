@@ -15,7 +15,7 @@ list_orders = {
         "total_cents": 15000,
         "payment_status": "pending",
         "delivery_status": "pending",
-        "estimated_delivery": "05/15/2026"
+        "estimated_delivery": "15/05/2026"
     }
 }
 
