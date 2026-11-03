@@ -20,7 +20,11 @@ the cost of latency, inference cost, and variable decisions.
 
 ```text
 03-react-tool-calling/
-├── main.py               # Model, graph, prompt, and console rendering
+├── main.py               # Provider setup and console execution/rendering
+├── agents.py             # Agent node with an injected tool-bound model
+├── graph.py              # Tool binding, nodes, edges, and graph compilation
+├── prompts.py            # System instructions
+├── state.py              # Shared message history based on MessagesState
 ├── tools.py              # Three read-only lookup tools
 ├── data.py               # Synthetic fixtures and lookup helper
 ├── README.md
@@ -41,6 +45,10 @@ flowchart TD
 
 `MessagesState` stores the message history and uses its message reducer to merge
 updates. Each node returns new messages rather than rebuilding the full history.
+`State` inherits this contract. `build_graph(llm)` binds the tool schemas to the
+supplied model and passes the same tools to `ToolNode`, then returns a compiled
+graph ready for `invoke` or `stream`. Imports do not read `.env`, create a provider
+client, or build a global application.
 
 | Component | Responsibility |
 | --- | --- |
@@ -141,8 +149,8 @@ python -m pip install "pytest>=8,<9"
 python -m pytest 01-agent-orchestration/03-react-tool-calling/tests -q -rx
 ```
 
-No Groq key or `.env` is needed for the tests. The suite replaces `ChatGroq` before
-importing `main.py`, disables dotenv loading, and blocks outbound socket connections.
+No Groq key or `.env` is needed for the tests. The suite forbids `ChatGroq`
+construction, dotenv loading, and outbound socket connections.
 It runs the actual graph, tools, and renderer with scripted AI messages. Local
 modules are loaded by path to avoid collisions with other labs' `main.py` files.
 
@@ -155,27 +163,21 @@ Coverage includes:
 - Repeated tool calls stopped by an explicitly configured graph recursion limit.
 - Console formatting, tool errors, and unexpected payloads.
 
-The fixture date consistency test is marked `xfail(strict=True)` because order
-1025 does not use DD/MM/YYYY. `XFAIL` documents an unresolved gap.
-After implementing a fix, the test becomes `XPASS(strict)` and fails until its
-marker is removed. Do not treat these expected failures as completed functionality.
+Fixture dates use DD/MM/YYYY. Order 1025's former `05/15/2026` value is represented
+as `15/05/2026`, preserving May 15 and making the date consistency test pass.
 
 Scripted model responses validate software behavior, not real model selection,
 grounding, prompt-injection resistance, or answer quality. These require separate
 live evaluation cases.
 
-Local offline verification on 2026-10-31: **23 passed, 1 xfailed**. The expected
-failure is the inconsistent date in order 1025. No live Groq call was made during
-this verification.
+Local offline verification on 2026-11-02: **25 passed**. No live Groq call was made
+during this verification.
 
 ## Known limitations and next exercises within this lab
 
-- Order 1025 uses `05/15/2026`, inconsistent with DD/MM/YYYY. Confirm the intended
-  date before correcting it.
-- `main.py` configures the model at import time. Tests isolate this with mocks;
-  a future `build_graph(llm)` function would simplify dependency injection.
-- The console does not explicitly configure or handle the graph recursion limit.
-  The limit test supplies one; it does not add graceful error handling to the CLI.
+- The console sets `recursion_limit=12` and reports when it is reached. This bounds
+  graph steps, not the number of tool calls or elapsed time; it does not produce
+  a model-generated final answer when the limit interrupts execution.
 - There is no offline CLI mode, persistence, or customer authorization layer.
 - The installed environment differs from root `requirements.txt`: validation uses
   LangGraph 1.2.11, langchain-core 1.6.0, langchain-groq 1.1.3, Flask 3.0.3, and
