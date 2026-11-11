@@ -33,7 +33,7 @@ def policy_check_node(state: RefundState) -> dict:
         "feedback": "",
         "evaluation_ok": False,
         "guardrail_issues": [],
-        "final_status": "PENDING_REVIEW",
+        "final_status": "PENDING",
         "final_response": "",
     }
 
@@ -183,13 +183,13 @@ def finalizer_node(state: RefundState) -> dict:
         or issues
     ):
         return {
-            "final_status": "FAILED_REVIEW",
+            "final_status": "REJECTED",
             "final_response": "",
             "evaluation_ok": False,
         }
 
     return {
-        "final_status": "TEXT_APPROVED",
+        "final_status": "APPROVED",
         "final_response": render_safe_response(
             state["policy_result"]
         ),
