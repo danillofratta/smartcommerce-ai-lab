@@ -4,6 +4,8 @@
 >
 > **Estado em 30/10/2026:** planejamento aprovado; **nenhum laboratório está implementado ou validado por este pacote**.
 
+> **Atualização em 23/11/2026 — Lab 06:** `01-agent-orchestration/06-llm-supervisor` implementado com supervisor LLM, especialistas determinísticos, execução exclusivamente com Groq, histórico e limites externos. Por orientação do proprietário, este laboratório não possui modo mock. Testes unitários isolam chamadas externas. Testes offline e smoke test Groq verificados; detalhes em seu README e em `docs/progress/STATUS.md`. Status de aprendizado: **IN_PROGRESS**, aguardando debug e explicação independente do proprietário. Este registro não valida os demais laboratórios nem altera o planejamento histórico abaixo.
+
 ## 1. Identidade e missão
 
 - **Nome:** SmartCommerce AI Lab
