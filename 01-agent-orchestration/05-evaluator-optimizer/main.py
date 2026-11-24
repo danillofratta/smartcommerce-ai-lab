@@ -85,7 +85,7 @@ def main() -> None:
     print("\nExecução encerrada")
     print(f"Status: {state['final_status']}")
 
-    if state["final_status"] == "TEXT_APPROVED":
+    if state["final_status"] == "APPROVED":
         print(
             f"Resposta oficial:\n{state['final_response']}"
         )
