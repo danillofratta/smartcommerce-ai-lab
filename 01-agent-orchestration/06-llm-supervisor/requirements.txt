@@ -1,0 +1,7 @@
+# Tested direct dependencies for Lab 06, Python 3.11.9.
+# Isolate this environment from the root requirements' different version ranges.
+langgraph==0.6.11
+langchain-core==0.3.86
+langchain-groq==0.3.8
+pydantic==2.14.3
+python-dotenv==1.2.4
